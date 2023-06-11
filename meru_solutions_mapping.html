@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Meru County Solutions</title>
+    <style>
+        body {
+            display: flex;
+        }
+
+        #map-container {
+            flex: 1;
+            width: 50%;
+        }
+
+        #map {
+            height: 100vh;
+            width: 70%;
+        }
+
+        .container {
+            flex: 1;
+            padding: 20px;
+        }
+
+        .legend {
+            background-color: white;
+            border: 1px solid gray;
+            border-radius: 5px;
+            padding: 10px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .legend-item span {
+            display: inline-block;
+            width: 15px;
+            height: 15px;
+            margin-right: 5px;
+        }
+
+        .attribute-value-icon {
+            background-color: #ffffff;
+            color: black;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 20px;
+        }
+
+        .total-sum {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        .legend-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+    </style>
+    <!-- Include D3.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.1.1/d3.min.js"></script>
+    <!-- Include Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.css" />
+    <!-- Include shp.js library -->
+    <script src="https://unpkg.com/shpjs/dist/shp.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Meru County Solutions</h1>
+        <p>
+            The solutions are categorised into x priority areas: Lighting, Poultry, Health, Water, Agriculture and Cooking. The solution are to be implemented in phases.
+        </p>
+        <p>
+            Select the solution and the phase you wish to view below and hover over the map to see the investment suggested for each subcounty. The total investment required is show at the bottom of this page.
+        </p>
+            
+        
+        <div>
+            <label for="shapefile-dropdown">Select Solution:</label>
+            <select id="shapefile-dropdown">
+                <option value="http://localhost:8000/meru_lighting.zip">Lighting</option>
+                <option value="http://localhost:8000/meru_poultry.zip">Poultry</option>
+                <option value="http://localhost:8000/meru_cooking.zip">Cooking</option>
+                <option value="http://localhost:8000/meru_agriculture.zip">Agriculture</option>
+                <option value="http://localhost:8000/meru_water.zip">Water</option>
+            </select>
+        </div>
+        <div>
+            <label for="attribute-dropdown">Select Phase:</label>
+            <select id="attribute-dropdown"></select>
+        </div>
+        <div id="legend" class="legend"></div>
+        <div class="total-sum">
+            Total Investment: <span id="total-investment"></span> Million
+        </div>
+    </div>
+    <div id="map"></div>
+
+    <!-- Include Leaflet library -->
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        var map = L.map('map').setView([0.2, 37.648399], 13);
+
+        var geojsonLayer;
+        var shapefileUrl;
+        var selectedAttribute;
+        var colorScale;
+        var minValue;
+        var maxValue;
+
+        var colorRange = d3.schemeOranges[9]; // Use the oranges colormap with 9 colors
+
+        var shapefileDropdown = document.getElementById('shapefile-dropdown');
+        shapefileDropdown.addEventListener('change', function() {
+            shapefileUrl = this.value;
+            loadGeoJSON();
+        });
+
+        function loadGeoJSON() {
+            shp(shapefileUrl).then(function(geojson) {
+                var attributes = Object.keys(geojson.features[0].properties);
+
+                var dropdown = document.getElementById('attribute-dropdown');
+                dropdown.innerHTML = '';
+                attributes.forEach(function(attribute) {
+                    if (attribute !== "subcounty") {
+                        dropdown.innerHTML += '<option value="' + attribute + '">' + attribute + '</option>';
+                    }
+                });
+
+                // Function to handle the dropdown change event
+                dropdown.addEventListener('change', function() {
+                    selectedAttribute = this.value;
+
+                    // Calculate the minimum and maximum values
+                    var values = geojson.features.map(function(feature) {
+                        return feature.properties[selectedAttribute];
+                    });
+                    minValue = Math.min.apply(null, values);
+                    maxValue = Math.max.apply(null, values);
+
+                    // Remove previous GeoJSON layer if exists
+                    if (geojsonLayer) {
+                        map.removeLayer(geojsonLayer);
+                    }
+
+                    geojsonLayer = L.geoJSON(geojson, {
+                        style: style,
+                        onEachFeature: onEachFeature
+                    }).addTo(map);
+
+                    // Fit the map bounds to the GeoJSON layer
+                    map.fitBounds(geojsonLayer.getBounds());
+
+                    // Update the legend
+                    updateLegend();
+
+                    // Calculate and display the total investment
+                    var totalInvestment = values.reduce(function(acc, val) {
+                        return acc + val;
+                    }, 0);
+                    document.getElementById('total-investment').textContent = totalInvestment.toFixed(2);
+                });
+
+                // Set the initial selected attribute
+                selectedAttribute = attributes[0];
+                dropdown.value = selectedAttribute;
+                dropdown.dispatchEvent(new Event('change'));
+            }).catch(function(error) {
+                console.error('Error:', error);
+            });
+        }
+
+        function style(feature) {
+            var value = feature.properties[selectedAttribute];
+            var fillColor = getColor(value);
+
+            // Set the color based on the attribute value
+            var styleObj = {
+                fillColor: fillColor,
+                weight: 0.8,
+                opacity: 1,
+                color: 'black',
+                fillOpacity: 1
+            };
+
+            // Display attribute value for values greater than zero
+            if (value > 0) {
+                var icon = L.divIcon({
+                    className: 'attribute-value-icon',
+                    html: value.toString(),
+                    iconSize: [20, 20]
+                });
+                styleObj.icon = icon;
+            }
+
+            return styleObj;
+        }
+
+        function getColor(value) {
+            if (value === 0) {
+                return '#ffffff'; // White color for zero values
+            } else {
+                var scale = d3.scaleLinear()
+                    .domain([minValue, maxValue])
+                    .range([0, colorRange.length - 1]);
+                var index = Math.round(scale(value));
+                return colorRange[index];
+            }
+        }
+
+        function updateLegend() {
+            var legend = document.getElementById('legend');
+            legend.innerHTML = '';
+
+            // Add title to the legend
+            var legendTitle = document.createElement('div');
+            legendTitle.textContent = 'Investment in Million KES';
+            legendTitle.classList.add('legend-title');
+            legend.appendChild(legendTitle);
+
+            // Get the unique attribute values
+            var uniqueValues = [...new Set(geojsonLayer.getLayers().map(function(layer) {
+                return layer.feature.properties[selectedAttribute];
+            }))]
+                .filter(function(value) {
+                    return value !== 0; // Exclude zero values from legend
+                })
+                .sort(d3.ascending);
+
+            // Define the color scale based on unique values
+            colorScale = d3.scaleLinear()
+                .domain([minValue, maxValue])
+                .range([colorRange[0], colorRange[colorRange.length - 1]]);
+
+            // Create legend items for each unique value
+            uniqueValues.forEach(function(value) {
+                var legendItem = document.createElement('div');
+                legendItem.className = 'legend-item';
+
+                var colorBox = document.createElement('span');
+                colorBox.style.backgroundColor = getColor(value);
+                legendItem.appendChild(colorBox);
+
+                var label = document.createElement('span');
+                label.textContent = value;
+                legendItem.appendChild(label);
+
+                legend.appendChild(legendItem);
+            });
+        }
+
+
+        function onEachFeature(feature, layer) {
+            layer.on({
+                mouseover: highlightFeature,
+                mouseout: resetHighlight
+            });
+        }
+
+        function highlightFeature(e) {
+            var layer = e.target;
+            layer.setStyle({
+                weight: 2,
+                color: 'white',
+                dashArray: '',
+                fillOpacity: 0.7
+            });
+
+            if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+                layer.bringToFront();
+            }
+
+            // Get the attribute value and the polygon name
+            var value = layer.feature.properties[selectedAttribute];
+            var name = layer.feature.properties.subcounty;
+
+            // Create a tooltip and bind it to the layer
+            // layer.bindTooltip('Attribute: ' + value.toString() + '<br>' + 'Polygon Name: ' + name, { sticky:
+            layer.bindTooltip('Subcounty: ' + name + '<br>' + 'Investment: ' + value.toString() + ' Million', {
+                sticky: true
+            }).openTooltip();
+        }
+
+        function resetHighlight(e) {
+            geojsonLayer.resetStyle(e.target);
+            // Close the tooltip when the mouse leaves the layer
+            e.target.closeTooltip();
+        }
+
+        // Load GeoJSON data and set up the dropdown
+        shapefileUrl = shapefileDropdown.value;
+        loadGeoJSON();
+    </script>
+</body>
+
+</html>
